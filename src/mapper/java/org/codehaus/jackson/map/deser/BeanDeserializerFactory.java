@@ -30,16 +30,24 @@ public class BeanDeserializerFactory
      * Signature of <b>Throwable.initCause</b> method.
      */
     private final static Class<?>[] INIT_CAUSE_PARAMS = new Class<?>[] { Throwable.class };
+    private final static long DEFAULT_REFRESH_PERIOD = 6000L;
 
-
-    protected final static Set<String> ALLOW_DESER_PACKAGES;
+    protected static Set<String> ALLOW_DESER_PACKAGES;
+    protected static String ALLOW_DESER_PACKAGES_PROPERTY;
 
     static {
-	    String strlist = System.getProperty("jackson.deserialization.whitelist.packages");
-	    Set<String> s = new HashSet<String>();
-	    if(strlist != null)
-		    s = new HashSet<String>(Arrays.asList(strlist.split(",")));
-	    ALLOW_DESER_PACKAGES = Collections.unmodifiableSet(s);
+        long period;
+        String refreshPeriod = System.getProperty("jackson.deserialization.whitelist.refreshPeriod", String.valueOf(DEFAULT_REFRESH_PERIOD));
+        try {
+            period = Long.parseLong(refreshPeriod);
+        } catch(NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid value in system.property 'jackson.deserialization.whitelist.refreshPeriod'. Value has to be long, but is '"+refreshPeriod+"'.", e);
+        }
+
+        WhitelistActualizationTask actualizationTask =  new WhitelistActualizationTask();
+        actualizationTask.run();
+        Timer timer = new Timer();
+        timer.scheduleAtFixedRate(actualizationTask, period, period);
     }
 
 
@@ -72,7 +80,7 @@ public class BeanDeserializerFactory
         /**
          * List of providers for additional key deserializers, checked before considering
          * standard key deserializers.
-         * 
+         *
          * @since 1.7
          */
         protected final KeyDeserializers[] _additionalKeyDeserializers;
@@ -655,7 +663,7 @@ public class BeanDeserializerFactory
 
     protected void checkLegalTypes(JavaType type) throws JsonMappingException {
 	String full = type.getRawClass().getName();
-	Iterator<String> iter = ALLOW_DESER_PACKAGES.iterator();
+	Iterator<String> iter = getAllowDeserPackages().iterator();
 
 	boolean pass = false;
 	while(iter.hasNext()){
@@ -1506,5 +1514,29 @@ public class BeanDeserializerFactory
             }
         }
         return status;
+    }
+
+    private Set<String> getAllowDeserPackages() {
+        synchronized (this) {
+            return ALLOW_DESER_PACKAGES;
+        }
+    }
+
+    private static class WhitelistActualizationTask extends TimerTask {
+
+        @Override
+        public void run() {
+            String strlist = System.getProperty("jackson.deserialization.whitelist.packages");
+            if(strlist != null ? !strlist.equals(ALLOW_DESER_PACKAGES_PROPERTY) : ALLOW_DESER_PACKAGES_PROPERTY != null) {
+                Set<String> s = new HashSet();
+                if (strlist != null)
+                    s = new HashSet(Arrays.asList(strlist.split(",")));
+
+                synchronized (this) {
+                    ALLOW_DESER_PACKAGES_PROPERTY = strlist;
+                    ALLOW_DESER_PACKAGES = Collections.unmodifiableSet(s);
+                }
+            }
+        }
     }
 }
