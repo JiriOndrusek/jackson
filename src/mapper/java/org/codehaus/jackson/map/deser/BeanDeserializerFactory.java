@@ -31,15 +31,27 @@ public class BeanDeserializerFactory
      */
     private final static Class<?>[] INIT_CAUSE_PARAMS = new Class<?>[] { Throwable.class };
 
-
     protected final static Set<String> ALLOW_DESER_PACKAGES;
 
+    /**
+     * Switch for fix of CVE_2017_15095
+     */
+    private final static boolean IGNORE_CVE_2017_15095;
+
     static {
-	    String strlist = System.getProperty("jackson.deserialization.whitelist.packages");
-	    Set<String> s = new HashSet<String>();
-	    if(strlist != null)
-		    s = new HashSet<String>(Arrays.asList(strlist.split(",")));
-	    ALLOW_DESER_PACKAGES = Collections.unmodifiableSet(s);
+        IGNORE_CVE_2017_15095 = Boolean.getBoolean("ignore-CVE-2017-15095");
+
+        if(!IGNORE_CVE_2017_15095) {
+            String strlist = System.getProperty("jackson.deserialization.whitelist.packages");
+            Set<String> s = new HashSet<String>();
+            if (strlist != null)
+                s = new HashSet<String>(Arrays.asList(strlist.split(",")));
+            ALLOW_DESER_PACKAGES = Collections.unmodifiableSet(s);
+        } else {
+            //if CVE fix (2017_15095) has to be ignored, setting to null to rather get NullPointerException then unwanted security behavior
+            //but it shouldn't happen at all in case that ignore is true
+            ALLOW_DESER_PACKAGES = null;
+        }
     }
 
 
@@ -645,29 +657,31 @@ public class BeanDeserializerFactory
             return null;
         }
 
-	//Don't allow dangerous deserialization without a whitelist
-	//https://github.com/mbechler/marshalsec/blob/master/marshalsec.pdf
-	checkLegalTypes(type);
+
+        //Don't allow dangerous deserialization without a whitelist
+        //https://github.com/mbechler/marshalsec/blob/master/marshalsec.pdf
+        checkLegalTypes(type);
 
         // Use generic bean introspection to build deserializer
         return buildBeanDeserializer(config, type, beanDesc, property);
     }
 
     protected void checkLegalTypes(JavaType type) throws JsonMappingException {
-	String full = type.getRawClass().getName();
-	Iterator<String> iter = ALLOW_DESER_PACKAGES.iterator();
+        if(!IGNORE_CVE_2017_15095) {
+            String full = type.getRawClass().getName();
+            Iterator<String> iter = ALLOW_DESER_PACKAGES.iterator();
 
-	boolean pass = false;
-	while(iter.hasNext()){
-		if(full.startsWith(iter.next())){
-			pass = true;
-			break;
-		}
-	}
-	if(!pass)
-		throw new JsonMappingException(
-				String.format("Illegal type (%s) to deserialize: prevented for security reasons", full));
-
+            boolean pass = false;
+            while (iter.hasNext()) {
+                if (full.startsWith(iter.next())) {
+                    pass = true;
+                    break;
+                }
+            }
+            if (!pass)
+                throw new JsonMappingException(
+                        String.format("Illegal type (%s) to deserialize: prevented for security reasons", full));
+        }
     }
 
     /**
